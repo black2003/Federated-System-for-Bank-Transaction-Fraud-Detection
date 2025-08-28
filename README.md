@@ -1,6 +1,7 @@
 # Federated Fraud Detection System (FEDv3)
 
 A real-time federated learning system for fraud detection with enhanced client dashboard, admin console, and ZKP integration.
+<img width="521" height="531" alt="FEDarcde" src="https://github.com/user-attachments/assets/f73a5dd3-5c7a-4264-88d8-4ae3112d4c45" />
 
 ## Features
 
