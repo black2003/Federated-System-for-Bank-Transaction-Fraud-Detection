@@ -1,0 +1,654 @@
+<h2 style="margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+  <span>Client Console</span>
+  <span style="display:flex; align-items:center; gap:8px;">
+    <label class="hint">Dark mode</label>
+    <input type="checkbox" id="dark_toggle" onchange="toggleDark(this.checked)" />
+    <button class="btn" onclick="logout()">Logout</button>
+  </span>
+</h2>
+<style>
+  .badge { display:inline-block; padding:2px 6px; border-radius:999px; font-size:12px; }
+  .badge-ok { background:#e7f6ea; color:#0a7e07; }
+  .badge-alert { background:#fde7ea; color:#b00020; }
+  .btn { padding:6px 10px; border:1px solid #ccc; border-radius:6px; background:#fff; cursor:pointer; }
+  .btn:hover { background:#f7f7f7; }
+  .tbl { width:100%; border-collapse:collapse; }
+  .tbl th, .tbl td { border-bottom:1px solid #eee; padding:6px; text-align:left; font-size:13px; }
+  .section { margin-top:12px; padding:8px; border:1px solid #ddd; border-radius:6px; background:#fff; }
+  .hint { font-size:12px; color:#666; }
+  #toast { position:fixed; right:12px; bottom:12px; z-index:9999; }
+  .toast-item { margin-top:6px; padding:10px 12px; background:#333; color:#fff; border-radius:6px; opacity:0.95; }
+</style>
+<div style="margin-bottom:10px; padding:8px; border:1px solid #ddd; border-radius:6px; background:#fafafa;">
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <label>Server URL:</label>
+    <input id="server_url" placeholder="http://127.0.0.1:8000" style="min-width:260px;" />
+    <button onclick="applyServerUrl()">Apply</button>
+    <button onclick="testServer()">Test</button>
+  </div>
+  <div style="margin-top:6px; color:#555;">Use your server IP/hostname, e.g. http://192.168.1.20:8000</div>
+  <div id="srv_status" style="margin-top:6px; font-size:12px; color:#666;"></div>
+</div>
+
+<div id="auth" style="padding:8px; border:1px solid #ddd; border-radius:6px; background:#fff;">
+  <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+    <input id="cid" placeholder="Client ID" />
+    <input id="cpw" placeholder="Password" type="password" />
+    <button onclick="login()">Login</button>
+  </div>
+  <div id="auth_status" style="margin-top:6px;"></div>
+  <div id="conn_hint" style="margin-top:6px; font-size:12px; color:#666;">Set server URL above first if connecting to a different machine.</div>
+  <div id="logged_in_as" style="display:none; margin-top:6px; color:#0a7e07; font-weight:bold;"></div>
+</div>
+
+<div id="panel" style="display:none; margin-top:16px;">
+  <div class="section" id="section_live">
+    <h3 style="margin:0 0 6px 0; display:flex; justify-content:space-between; align-items:center;">
+      <span>Live Stream</span>
+      <button class="btn" onclick="toggleSection('live_body')" style="padding:2px 8px;">Collapse</button>
+    </h3>
+    <div id="live_body">
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <button class="btn" onclick="connectStream()">Connect Stream</button>
+      <span id="ws_status" class="hint">Disconnected</span>
+    </div>
+    <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-top:6px;">
+      <label>Threshold:</label>
+      <input type="range" id="thresh" min="0" max="1" step="0.01" value="0.5" oninput="updateThreshLabel(this.value)" />
+      <span id="thresh_lbl">0.50</span>
+      <button id="pause_btn" class="btn" onclick="togglePause()">Pause</button>
+      <button class="btn" onclick="clearStream()">Clear</button>
+      <button class="btn" onclick="exportStream()">Export CSV</button>
+      <button class="btn" onclick="exportStream(true)">Export Fraud Only</button>
+      <label class="hint" style="display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" id="auto_reconn" checked onchange="AUTO_RECONNECT=this.checked" /> Auto-reconnect
+      </label>
+      <label class="hint" style="display:flex; align-items:center; gap:4px;">
+        <input type="checkbox" id="zkp_toggle" checked onchange="ZKP_EXPORT=this.checked" /> Export to ZKP
+      </label>
+      <span id="zkp_status" class="hint">ZKP exported: 0</span>
+      <span id="stats" class="hint">Total: 0 | Fraud: 0 | OK: 0</span>
+    </div>
+    <div id="live_alert" style="margin-top:6px; font-weight:bold;"></div>
+    <div style="margin-top:8px; max-height:280px; overflow:auto; border:1px solid #eee; border-radius:6px;">
+      <table class="tbl" id="stream_tbl">
+        <thead>
+          <tr><th>Time</th><th>Type</th><th>Amount</th><th>Score</th><th>Label</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    </div>
+  </div>
+
+  <div class="section" id="section_eval">
+    <h3 style="margin:0 0 6px 0; display:flex; justify-content:space-between; align-items:center;">
+      <span>Evaluate Local Dataset (CSV) - Prediction Only</span>
+      <button class="btn" onclick="toggleSection('eval_body')" style="padding:2px 8px;">Collapse</button>
+    </h3>
+    <div id="eval_body">
+      <div class="hint" style="margin-bottom:8px; color:#666;">
+        <strong>Note:</strong> This is for prediction only. The CSV should NOT contain an 'isFraud' column - 
+        that's what we're predicting! If 'isFraud' column exists, it will be ignored. 
+        Required columns: amount, oldbalanceOrg, newbalanceOrig, oldbalanceDest, newbalanceDest, type
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <input type="file" id="eval_file" accept=".csv" />
+        <button class="btn" onclick="evaluateDataset()">Evaluate</button>
+        <button class="btn" onclick="exportEvaluation()">Export Predictions</button>
+        <button class="btn" onclick="checkModelStatus()">Check Model Status</button>
+      </div>
+      <div id="eval_progress" style="display:none; margin-top:8px;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+          <span class="hint">Processing CSV...</span>
+          <span id="eval_progress_text" class="hint">0%</span>
+        </div>
+        <div style="width:100%; height:8px; background:#eee; border-radius:4px; overflow:hidden;">
+          <div id="eval_progress_bar" style="width:0%; height:100%; background:#0a7e07; transition:width 0.3s;"></div>
+        </div>
+      </div>
+      <div id="eval_log" style="display:none; margin-top:8px; padding:8px; background:#f5f5f5; border-radius:4px; max-height:120px; overflow:auto; font-family:monospace; font-size:12px;"></div>
+      <div id="eval_summary" class="hint" style="margin-top:6px;"></div>
+      <pre id="eval_out" style="margin-top:6px;"></pre>
+    </div>
+  </div>
+
+  <div class="section" id="section_train">
+    <h3 style="margin:0 0 6px 0; display:flex; justify-content:space-between; align-items:center;">
+      <span>Local Retrain From Dataset (CSV) - Training with Labels</span>
+      <button class="btn" onclick="toggleSection('train_body')" style="padding:2px 8px;">Collapse</button>
+    </h3>
+    <div id="train_body">
+      <div class="hint" style="margin-bottom:8px; color:#666;">
+        <strong>Note:</strong> This is for training and requires labeled data. The CSV MUST contain an 'isFraud' column 
+        with 0/1 values. Required columns: amount, oldbalanceOrg, newbalanceOrig, oldbalanceDest, newbalanceDest, type, isFraud
+      </div>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <input type="file" id="train_file" accept=".csv" />
+        <input type="number" id="train_epochs" min="1" value="1" />
+        <button class="btn" onclick="localRetrain()">Local Retrain & Push</button>
+      </div>
+      <div id="train_progress" style="display:none; margin-top:8px;">
+        <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+          <span class="hint">Training model...</span>
+          <span id="train_progress_text" class="hint">0%</span>
+        </div>
+        <div style="width:100%; height:8px; background:#eee; border-radius:4px; overflow:hidden;">
+          <div id="train_progress_bar" style="width:0%; height:100%; background:#0a7e07; transition:width 0.3s;"></div>
+        </div>
+      </div>
+      <div id="train_log" style="display:none; margin-top:8px; padding:8px; background:#f5f5f5; border-radius:4px; max-height:120px; overflow:auto; font-family:monospace; font-size:12px;"></div>
+      <pre id="train_out" style="margin-top:6px;"></pre>
+    </div>
+  </div>
+
+  <div class="section" id="section_push">
+    <h3 style="margin:0 0 6px 0; display:flex; justify-content:space-between; align-items:center;">
+      <span>Online Update (Upload Model State + IF Snapshot)</span>
+      <button class="btn" onclick="toggleSection('push_body')" style="padding:2px 8px;">Collapse</button>
+    </h3>
+    <div class="hint">Upload a PyTorch state_dict file (e.g. state.pt) and optional IF npy buffer.</div>
+    <div id="push_body" style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-top:6px;">
+      <input type="file" id="lstm_state" accept=".pt,.pth,.bin" />
+      <input type="file" id="if_snapshot" accept=".npy" />
+      <button class="btn" onclick="pushUpdate()">Push Update</button>
+    </div>
+    <pre id="push_out" style="margin-top:6px;"></pre>
+  </div>
+</div>
+
+<script>
+let TOKEN = null;
+let SERVER_BASE = window.location.origin;
+let PAUSED = false;
+let STREAM_DATA = [];
+let EVAL_LAST = null;
+let AUTO_RECONNECT = true;
+let ZKP_EXPORT = true;
+let ZKP_COUNT = 0;
+
+function applyServerUrl(){
+  const inp = document.getElementById('server_url');
+  const v = (inp.value||'').trim();
+  SERVER_BASE = v || window.location.origin;
+  document.getElementById('srv_status').textContent = `Using server: ${SERVER_BASE}`;
+  try { localStorage.setItem('server_base', SERVER_BASE); } catch(e){}
+}
+
+function apiUrl(path){
+  return SERVER_BASE.replace(/\/$/, '') + path;
+}
+
+function toast(msg, kind='info'){
+  const cont = document.getElementById('toast') || (function(){ const d=document.createElement('div'); d.id='toast'; document.body.appendChild(d); return d; })();
+  const t = document.createElement('div');
+  t.className = 'toast-item';
+  t.textContent = msg;
+  if(kind==='error'){ t.style.background = '#b00020'; }
+  if(kind==='success'){ t.style.background = '#0a7e07'; }
+  cont.appendChild(t);
+  setTimeout(()=>{ t.remove(); }, 3000);
+}
+
+function updateThreshLabel(v){
+  const n = Number(v||0).toFixed(2);
+  document.getElementById('thresh_lbl').textContent = n;
+  try { localStorage.setItem('threshold', String(Number(v||0))); } catch(e){}
+}
+async function login(){
+  const client_id = document.getElementById('cid').value;
+  const password = document.getElementById('cpw').value;
+  const fd = new FormData();
+  fd.append('client_id', client_id);
+  fd.append('password', password);
+  try{
+    const r = await fetch(apiUrl('/login'), {method:'POST', body: fd});
+    const j = await r.json().catch(()=>({}));
+    document.getElementById('auth_status').innerText = JSON.stringify(j);
+    if(r.ok && j.token){
+      TOKEN = j.token;
+      document.getElementById('panel').style.display = '';
+      document.getElementById('logged_in_as').style.display = '';
+      document.getElementById('logged_in_as').textContent = `Logged in as ${j.client_id}`;
+      toast('Logged in successfully','success');
+      try { localStorage.setItem('token', TOKEN); localStorage.setItem('client_id', j.client_id||''); } catch(e){}
+    } else {
+      toast('Login failed','error');
+    }
+  } catch(e){ toast('Login request failed','error'); }
+}
+
+let ws = null;
+function connectStream(){
+  if(ws){ ws.close(); ws = null; }
+  try{
+    const base = new URL(SERVER_BASE);
+    const wsProto = base.protocol === 'https:' ? 'wss' : 'ws';
+    const wsUrl = `${wsProto}://${base.host}/stream`;
+    ws = new WebSocket(wsUrl);
+  } catch(e){
+    try {
+      ws = new WebSocket((location.protocol==='https:'?'wss':'ws')+'://'+location.host+'/stream');
+    } catch(err) {
+      console.error('WS connect failed');
+      return;
+    }
+  }
+  const wsStatus = document.getElementById('ws_status');
+  ws.onopen = ()=>{ wsStatus.textContent = 'Connected'; wsStatus.style.color = '#0a7e07'; };
+  ws.onclose = ()=>{ wsStatus.textContent = 'Disconnected'; wsStatus.style.color = '#666'; if(AUTO_RECONNECT){ setTimeout(()=>{ if(!ws || ws.readyState===WebSocket.CLOSED){ connectStream(); } }, 1500); } };
+  ws.onerror = ()=>{ wsStatus.textContent = 'Error'; wsStatus.style.color = '#b00020'; };
+  ws.onmessage = (ev)=>{
+    try{
+      const tx = JSON.parse(ev.data);
+      if(!PAUSED){ predictOne(tx).catch(()=>{}); }
+    }catch(e){}
+  };
+}
+
+async function predictOne(tx){
+  if(!TOKEN){ return; }
+  const fd = new FormData();
+  fd.append('token', TOKEN);
+  fd.append('batch', JSON.stringify([tx]));
+  const r = await fetch(apiUrl('/predict'), {method:'POST', body: fd});
+  if(!r.ok){ return; }
+  const j = await r.json();
+  const p = (j.p_fused && j.p_fused.length) ? j.p_fused[0] : 0;
+  const thresh = Number(document.getElementById('thresh').value||'0.5');
+  const isFraud = p >= thresh;
+  // update live alert
+  const la = document.getElementById('live_alert');
+  la.textContent = isFraud ? 'ALERT: Fraudulent transaction detected!' : 'Live stream OK';
+  la.className = isFraud ? 'badge badge-alert' : 'badge badge-ok';
+  // update stats and table
+  const rec = { time: new Date().toLocaleTimeString(), type: tx.type, amount: tx.amount, score: p, label: isFraud?'FRAUD':'OK' };
+  STREAM_DATA.unshift(rec);
+  if(STREAM_DATA.length > 500){ STREAM_DATA.pop(); }
+  renderStreamRow(rec);
+  updateStats();
+  // Export to ZKP server in background
+  if(ZKP_EXPORT){ zkpExport(tx, p, isFraud ? 1 : 0).catch(()=>{}); }
+}
+
+async function zkpExport(tx, p_fused, pred){
+  if(!TOKEN){ return; }
+  try{
+    const fd = new FormData();
+    fd.append('token', TOKEN);
+    fd.append('tx_json', JSON.stringify(tx));
+    fd.append('p_fused', String(p_fused));
+    fd.append('pred', String(pred));
+    const r = await fetch(apiUrl('/zkp/export_tx'), {method:'POST', body: fd});
+    if(!r.ok){ return; }
+    ZKP_COUNT++;
+    const zs = document.getElementById('zkp_status');
+    if(zs){ zs.textContent = `ZKP exported: ${ZKP_COUNT}`; }
+  } catch(e){ /* ignore */ }
+}
+
+// On load, restore persisted settings
+document.addEventListener('DOMContentLoaded', () => {
+  try {
+    const savedBase = localStorage.getItem('server_base');
+    if(savedBase){
+      SERVER_BASE = savedBase;
+      const inp = document.getElementById('server_url');
+      if(inp){ inp.value = savedBase; }
+      const st = document.getElementById('srv_status');
+      if(st){ st.textContent = `Using server: ${SERVER_BASE}`; }
+    }
+    const savedToken = localStorage.getItem('token');
+    const savedCid = localStorage.getItem('client_id');
+    if(savedToken){
+      TOKEN = savedToken;
+      document.getElementById('panel').style.display = '';
+      if(savedCid){
+        const la = document.getElementById('logged_in_as');
+        if(la){ la.style.display=''; la.textContent = `Logged in as ${savedCid}`; }
+      }
+    }
+    const savedThr = localStorage.getItem('threshold');
+    if(savedThr !== null){
+      const thr = document.getElementById('thresh');
+      if(thr){ thr.value = savedThr; updateThreshLabel(savedThr); }
+    } else {
+      updateThreshLabel(document.getElementById('thresh').value);
+    }
+    const savedDark = localStorage.getItem('dark');
+    if(savedDark === '1'){
+      const t = document.getElementById('dark_toggle');
+      if(t){ t.checked = true; }
+      toggleDark(true);
+    }
+    const autoChk = document.getElementById('auto_reconn');
+    if(autoChk){ AUTO_RECONNECT = !!autoChk.checked; }
+  } catch(e){}
+});
+
+async function evaluateDataset(){
+  if(!TOKEN){ alert('Login first'); return; }
+  const file = document.getElementById('eval_file').files[0];
+  if(!file){ alert('Choose CSV'); return; }
+  
+  // Show progress and log areas
+  const progressDiv = document.getElementById('eval_progress');
+  const logDiv = document.getElementById('eval_log');
+  const progressBar = document.getElementById('eval_progress_bar');
+  const progressText = document.getElementById('eval_progress_text');
+  
+  progressDiv.style.display = 'block';
+  logDiv.style.display = 'block';
+  logDiv.innerHTML = '';
+  
+  // Simulate progress for file processing
+  let progress = 0;
+  const progressInterval = setInterval(() => {
+    progress += Math.random() * 15;
+    if(progress > 90) progress = 90;
+    progressBar.style.width = progress + '%';
+    progressText.textContent = Math.round(progress) + '%';
+    logDiv.innerHTML += `Processing row ${Math.floor(progress * 10)}...<br>`;
+    logDiv.scrollTop = logDiv.scrollHeight;
+  }, 100);
+  
+  const fd = new FormData();
+  fd.append('token', TOKEN);
+  fd.append('dataset', file);
+  try{
+    logDiv.innerHTML += `Uploading ${file.name} (${(file.size/1024).toFixed(1)} KB)...<br>`;
+    logDiv.scrollTop = logDiv.scrollHeight;
+    
+    const r = await fetch(apiUrl('/client/evaluate_dataset'), {method:'POST', body: fd});
+    clearInterval(progressInterval);
+    
+    // Complete progress
+    progressBar.style.width = '100%';
+    progressText.textContent = '100%';
+    
+    if(r.ok){
+      logDiv.innerHTML += 'Evaluation complete!<br>';
+      const txt = await r.text();
+      document.getElementById('eval_out').textContent = txt;
+      try{
+        const j = JSON.parse(txt);
+        EVAL_LAST = j;
+        const probs = Array.isArray(j.p_fused) ? j.p_fused : [];
+        const thresh = Number(document.getElementById('thresh').value||'0.5');
+        const frauds = probs.filter(v => v >= thresh).length;
+        const total = probs.length;
+        const oks = Math.max(0, total - frauds);
+        
+        // Update summary - note that we're predicting on unlabeled data
+        document.getElementById('eval_summary').textContent = `Predicted rows: ${total} | Fraud: ${frauds} | OK: ${oks} (threshold ${thresh.toFixed(2)}) - Note: This is prediction on unlabeled data`;
+        
+        if(frauds > 0){
+          toast('ALERT: Fraud detected in uploaded dataset!','error');
+          logDiv.innerHTML += `⚠️ FRAUD DETECTED: ${frauds} transactions flagged as potentially fraudulent<br>`;
+        } else {
+          toast('No fraud detected in dataset.','success');
+          logDiv.innerHTML += `✅ No fraud detected: All ${total} transactions appear legitimate<br>`;
+        }
+        
+        // Show prediction statistics
+        if(probs.length > 0) {
+          const maxProb = Math.max(...probs);
+          const minProb = Math.min(...probs);
+          const avgProb = probs.reduce((a, b) => a + b, 0) / probs.length;
+          logDiv.innerHTML += `📊 Prediction Stats: Max=${maxProb.toFixed(3)}, Min=${minProb.toFixed(3)}, Avg=${avgProb.toFixed(3)}<br>`;
+        }
+        
+      }catch(e){
+        logDiv.innerHTML += `Error parsing response: ${e}<br>`;
+        logDiv.innerHTML += `Raw response: ${txt}<br>`;
+      }
+    } else {
+      // Handle error response
+      const errorText = await r.text();
+      logDiv.innerHTML += `Evaluation failed (HTTP ${r.status})<br>`;
+      logDiv.innerHTML += `Error details: ${errorText}<br>`;
+      document.getElementById('eval_out').textContent = `HTTP ${r.status}: ${errorText}`;
+      toast('Evaluation failed','error');
+    }
+  } catch(e){ 
+    clearInterval(progressInterval);
+    logDiv.innerHTML += `Network error: ${e}<br>`;
+    document.getElementById('eval_out').textContent = `Network error: ${e}`;
+    toast('Evaluation failed','error'); 
+  }
+  
+  // Hide progress after delay
+  setTimeout(() => {
+    progressDiv.style.display = 'none';
+    logDiv.style.display = 'none';
+  }, 8000); // Increased to 8 seconds to read all the information
+}
+
+async function localRetrain(){
+  if(!TOKEN){ alert('Login first'); return; }
+  const file = document.getElementById('train_file').files[0];
+  const epochs = document.getElementById('train_epochs').value || 1;
+  if(!file){ alert('Choose CSV'); return; }
+  
+  // Show progress and log areas
+  const progressDiv = document.getElementById('train_progress');
+  const logDiv = document.getElementById('train_log');
+  const progressBar = document.getElementById('train_progress_bar');
+  const progressText = document.getElementById('train_progress_text');
+  
+  progressDiv.style.display = 'block';
+  logDiv.style.display = 'block';
+  logDiv.innerHTML = '';
+  
+  // Simulate training progress
+  let progress = 0;
+  const totalSteps = epochs * 3; // 3 steps per epoch: data load, training, aggregation
+  let currentStep = 0;
+  
+  const progressInterval = setInterval(() => {
+    currentStep++;
+    progress = (currentStep / totalSteps) * 100;
+    if(progress > 90) progress = 90;
+    
+    progressBar.style.width = progress + '%';
+    progressText.textContent = Math.round(progress) + '%';
+    
+    // Add training logs
+    if(currentStep <= epochs) {
+      logDiv.innerHTML += `Epoch ${currentStep}/${epochs}: Training LSTM...<br>`;
+    } else if(currentStep <= epochs * 2) {
+      logDiv.innerHTML += `Epoch ${currentStep - epochs}/${epochs}: Updating Isolation Forest...<br>`;
+    } else {
+      logDiv.innerHTML += `Aggregating with global model...<br>`;
+    }
+    
+    logDiv.scrollTop = logDiv.scrollHeight;
+  }, 200);
+  
+  const fd = new FormData();
+  fd.append('token', TOKEN);
+  fd.append('epochs', epochs);
+  fd.append('dataset', file);
+  try{
+    const r = await fetch(apiUrl('/client/local_retrain_dataset'), {method:'POST', body: fd});
+    clearInterval(progressInterval);
+    
+    // Complete progress
+    progressBar.style.width = '100%';
+    progressText.textContent = '100%';
+    logDiv.innerHTML += 'Training complete! Pushing to global...<br>';
+    
+    const t = await r.text();
+    document.getElementById('train_out').textContent = t;
+    if(r.ok){ toast('Local retrain complete and pushed to global.','success'); } else { toast('Local retrain failed','error'); }
+  } catch(e){ toast('Local retrain request failed','error'); }
+  
+  // Hide progress after delay
+  setTimeout(() => {
+    progressDiv.style.display = 'none';
+    logDiv.style.display = 'none';
+  }, 3000);
+}
+
+async function pushUpdate(){
+  if(!TOKEN){ alert('Login first'); return; }
+  const lstm = document.getElementById('lstm_state').files[0];
+  const ifnpy = document.getElementById('if_snapshot').files[0];
+  if(!lstm && !ifnpy){ alert('Select at least one file'); return; }
+  const fd = new FormData();
+  fd.append('token', TOKEN);
+  if(lstm) fd.append('lstm_state', lstm);
+  if(ifnpy) fd.append('if_snapshot', ifnpy);
+  try{
+    const r = await fetch(apiUrl('/push_update'), {method:'POST', body: fd});
+    const t = await r.text();
+    document.getElementById('push_out').textContent = t;
+    if(r.ok){ toast('Update pushed successfully.','success'); } else { toast('Push update failed','error'); }
+  } catch(e){ toast('Push update request failed','error'); }
+}
+
+function exportEvaluation(){
+  if(!EVAL_LAST || !Array.isArray(EVAL_LAST.p_fused)){ toast('Run evaluation first'); return; }
+  const headers = ['p_fused','p_lstm','s_iso'];
+  const n = EVAL_LAST.p_fused.length;
+  let csv = headers.join(',') + '\n';
+  for(let i=0;i<n;i++){
+    const row = [EVAL_LAST.p_fused[i], (EVAL_LAST.p_lstm||[])[i] ?? '', (EVAL_LAST.s_iso||[])[i] ?? ''];
+    csv += row.join(',') + '\n';
+  }
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'evaluation_predictions.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function checkModelStatus(){
+  if(!TOKEN){ alert('Login first'); return; }
+  const logDiv = document.getElementById('eval_log');
+  logDiv.style.display = 'block';
+  logDiv.innerHTML = '';
+  logDiv.innerHTML += 'Checking model status...<br>';
+  logDiv.scrollTop = logDiv.scrollHeight;
+
+  try {
+    const r = await fetch(apiUrl('/model_status'), { method: 'GET', headers: { 'Authorization': `Bearer ${TOKEN}` } });
+    if (r.ok) {
+      const txt = await r.text();
+      logDiv.innerHTML += `Model status: ${txt}<br>`;
+      toast('Model status checked successfully.','success');
+    } else {
+      const errorText = await r.text();
+      logDiv.innerHTML += `Model status check failed (HTTP ${r.status})<br>`;
+      logDiv.innerHTML += `Error details: ${errorText}<br>`;
+      toast('Model status check failed','error');
+    }
+  } catch(e) {
+    logDiv.innerHTML += `Network error: ${e}<br>`;
+    toast('Model status check failed','error');
+  }
+  setTimeout(() => {
+    logDiv.style.display = 'none';
+  }, 5000); // Hide log after 5 seconds
+}
+
+function toggleDark(on){
+  document.documentElement.style.background = on ? '#111' : '';
+  document.body.style.background = on ? '#111' : '';
+  document.body.style.color = on ? '#eee' : '';
+  try { localStorage.setItem('dark', on ? '1':'0'); } catch(e){}
+}
+
+function logout(){
+  TOKEN = null;
+  document.getElementById('panel').style.display = 'none';
+  document.getElementById('logged_in_as').style.display = 'none';
+  toast('Logged out');
+  try { localStorage.removeItem('token'); localStorage.removeItem('client_id'); } catch(e){}
+}
+
+function renderStreamRow(rec){
+  const tb = document.querySelector('#stream_tbl tbody');
+  const tr = document.createElement('tr');
+  const scoreStr = Number(rec.score||0).toFixed(3);
+  tr.innerHTML = `<td>${rec.time}</td><td>${rec.type}</td><td>${rec.amount}</td><td>${scoreStr}</td><td>${rec.label}</td>`;
+  tr.style.color = rec.label === 'FRAUD' ? '#b00020' : '';
+  tb.prepend(tr);
+  while(tb.children.length > 200){ tb.removeChild(tb.lastChild); }
+}
+
+function updateStats(){
+  const total = STREAM_DATA.length;
+  let fraud = 0;
+  for(const r of STREAM_DATA){ if(r.label === 'FRAUD') fraud++; }
+  const ok = Math.max(0, total - fraud);
+  document.getElementById('stats').textContent = `Total: ${total} | Fraud: ${fraud} | OK: ${ok}`;
+}
+
+function togglePause(){
+  PAUSED = !PAUSED;
+  const btn = document.getElementById('pause_btn');
+  btn.textContent = PAUSED ? 'Resume' : 'Pause';
+  toast(PAUSED ? 'Stream paused' : 'Stream resumed');
+}
+
+function clearStream(){
+  STREAM_DATA = [];
+  const tb = document.querySelector('#stream_tbl tbody');
+  tb.innerHTML = '';
+  updateStats();
+}
+
+function exportStream(){
+  return exportStream(false);
+}
+
+function exportStream(fraudOnly){
+  const data = fraudOnly ? STREAM_DATA.filter(r => r.label==='FRAUD') : STREAM_DATA;
+  if(data.length === 0){ toast('No data to export'); return; }
+  const headers = ['time','type','amount','score','label'];
+  const rows = data.map(r => [r.time, r.type, r.amount, Number(r.score||0).toFixed(3), r.label]);
+  let csv = headers.join(',') + '\n';
+  for(const row of rows){ csv += row.join(',') + '\n'; }
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = fraudOnly ? 'stream_predictions_fraud.csv' : 'stream_predictions.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function testServer(){
+  const url = apiUrl('/');
+  const t0 = performance.now();
+  try{
+    const r = await fetch(url, {method:'GET'});
+    const t1 = performance.now();
+    const ms = Math.round(t1 - t0);
+    if(r.ok){
+      document.getElementById('srv_status').textContent = `Reachable (${ms} ms)`;
+      document.getElementById('srv_status').style.color = '#0a7e07';
+      toast('Server reachable','success');
+    } else {
+      document.getElementById('srv_status').textContent = `Unreachable (HTTP ${r.status})`;
+      document.getElementById('srv_status').style.color = '#b00020';
+      toast('Server test failed','error');
+    }
+  } catch(e){
+    document.getElementById('srv_status').textContent = 'Unreachable';
+    document.getElementById('srv_status').style.color = '#b00020';
+    toast('Server test failed','error');
+  }
+}
+
+function toggleSection(bodyId){
+  const el = document.getElementById(bodyId);
+  if(!el) return;
+  el.style.display = (el.style.display === 'none') ? '' : 'none';
+}
+</script>
+
+<div id="toast"></div>
+
+

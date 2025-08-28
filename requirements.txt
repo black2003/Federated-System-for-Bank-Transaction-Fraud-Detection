@@ -1,0 +1,30 @@
+# Core web framework and server dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+jinja2>=3.1.0
+python-multipart>=0.0.6
+
+# Machine learning and data processing
+numpy>=1.24.0
+scikit-learn>=1.3.0
+torch>=2.0.0
+joblib>=1.3.0
+
+# HTTP client and utilities
+requests>=2.31.0
+websocket-client>=1.6.0
+
+# Data handling and serialization
+pandas>=2.0.0
+pydantic>=2.0.0
+
+# Optional: Flask dependencies (for legacy server.py)
+flask>=2.3.0
+flask-socketio>=5.3.0
+
+# Development and testing (optional)
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# Note: ZKP dependencies are in ZKP/MitsubishiProd/requirements.txt
+# Install those separately if using ZKP features

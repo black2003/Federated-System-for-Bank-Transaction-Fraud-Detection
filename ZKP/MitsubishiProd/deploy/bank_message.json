@@ -1,0 +1,8 @@
+{
+  "sample_id": 20,
+  "prediction": 0,
+  "true_label": 0,
+  "proof_path": "",
+  "zkp_status": "ZKP unavailable: No module named 'api'",
+  "p_fused": 0.00048814121983014046
+}

@@ -1,0 +1,10 @@
+{
+  "clients": {
+    "ABC123": {
+      "name": "Bank of Blitz"
+    },
+    "AEZ12": {
+      "name": "Bank of Replit"
+    }
+  }
+}

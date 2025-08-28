@@ -1,0 +1,404 @@
+<h2 style="margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; gap:8px;">
+  <span>Admin Console</span>
+  <span style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+    <button class="btn" onclick="testServer()">Test Server</button>
+    <span id="srv_status" class="hint"></span>
+    <label style="font-size:12px; color:#666;">Dark mode</label>
+    <input type="checkbox" id="dark_toggle" onchange="toggleDark(this.checked)" />
+  </span>
+</h2>
+
+<style>
+  .btn { padding:6px 10px; border:1px solid #ccc; border-radius:6px; background:#fff; cursor:pointer; }
+  .btn:hover { background:#f7f7f7; }
+  .section { margin-top:12px; padding:8px; border:1px solid #ddd; border-radius:6px; background:#fff; }
+  .tbl { width:100%; border-collapse:collapse; }
+  .tbl th, .tbl td { border-bottom:1px solid #eee; padding:6px; text-align:left; font-size:13px; }
+  .hint { font-size:12px; color:#666; }
+  #toast { position:fixed; right:12px; bottom:12px; z-index:9999; }
+  .toast-item { margin-top:6px; padding:10px 12px; background:#333; color:#fff; border-radius:6px; opacity:0.95; }
+  @keyframes spin { from { transform: rotate(0deg);} to { transform: rotate(360deg);} }
+</style>
+
+<div class="section">
+  <h3 style="margin:0 0 6px 0;">Clients</h3>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+    <input id="filter" placeholder="Search by ID or name" oninput="renderClients()" />
+    <button class="btn" onclick="openAddForm()">Add Client</button>
+    <a class="btn" href="/client" target="_blank">Open Client Console</a>
+    <button class="btn" onclick="exportClients()">Export Clients CSV</button>
+    <span id="client_count" class="hint"></span>
+  </div>
+  <div id="add_form" style="display:none; margin-bottom:8px;">
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <input id="add_id" placeholder="Client ID" />
+      <input id="add_name" placeholder="Name" />
+      <input id="add_pwd" placeholder="Password" type="password" />
+      <input id="admin_pwd_add" placeholder="Admin password" type="password" />
+      <button class="btn" onclick="submitAdd()">Submit</button>
+      <button class="btn" onclick="cancelAdd()">Cancel</button>
+    </div>
+  </div>
+  <div id="client_progress" style="display:none; margin-top:8px;">
+    <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+      <span class="hint">Processing client operation...</span>
+      <span id="client_progress_text" class="hint">0%</span>
+    </div>
+    <div style="width:100%; height:8px; background:#eee; border-radius:4px; overflow:hidden;">
+      <div id="client_progress_bar" style="width:0%; height:100%; background:#0a7e07; transition:width 0.3s;"></div>
+    </div>
+  </div>
+  <div id="client_log" style="display:none; margin-top:8px; padding:8px; background:#f5f5f5; border-radius:4px; max-height:120px; overflow:auto; font-family:monospace; font-size:12px;"></div>
+  <div style="max-height:320px; overflow:auto; border:1px solid #eee; border-radius:6px;">
+    <table class="tbl" id="tbl">
+      <thead><tr><th>ID</th><th>Name</th><th style="width:140px;">Actions</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</div>
+
+<div class="section" id="section_train">
+  <h3 style="margin:0 0 6px 0; display:flex; justify-content:space-between; align-items:center;">
+    <span>Global Training (CSV with Labels)</span>
+    <button class="btn" onclick="toggleSection('train_body')" style="padding:2px 8px;">Collapse</button>
+  </h3>
+  <div id="train_body">
+    <div class="hint" style="margin-bottom:8px; color:#666;">
+      <strong>Note:</strong> Training requires labeled data. The CSV MUST contain an 'isFraud' column with 0/1 values. 
+      Required columns: amount, oldbalanceOrg, newbalanceOrig, oldbalanceDest, newbalanceDest, type, isFraud
+    </div>
+    <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+      <input type="password" id="admin_pw" placeholder="Admin Password" />
+      <input type="file" id="dataset_file" accept=".csv" />
+      <input type="number" id="epochs" min="1" value="1" />
+      <button class="btn" onclick="trainGlobalDataset()">Train Global Model</button>
+    </div>
+    <div id="train_progress" style="display:none; margin-top:8px;">
+      <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+        <span class="hint">Training global model...</span>
+        <span id="train_progress_text" class="hint">0%</span>
+      </div>
+      <div style="width:100%; height:8px; background:#eee; border-radius:4px; overflow:hidden;">
+        <div id="train_progress_bar" style="width:0%; height:100%; background:#0a7e07; transition:width 0.3s;"></div>
+      </div>
+    </div>
+    <div id="train_log" style="display:none; margin-top:8px; padding:8px; background:#f5f5f5; border-radius:4px; max-height:120px; overflow:auto; font-family:monospace; font-size:12px;"></div>
+    <div id="spinner" style="display:none; margin-top:6px;">⏳ Training...</div>
+    <div id="status" style="margin-top:6px;"></div>
+    <div style="margin-top:8px;">
+      <button class="btn" onclick="bootstrapAdmin()">Bootstrap Admin Password</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+  // Global state
+  let CLIENTS = [];
+  
+  // Utility functions
+  function toggleSection(sectionId) {
+    const section = document.getElementById(sectionId);
+    if (section.style.display === 'none') {
+      section.style.display = 'block';
+    } else {
+      section.style.display = 'none';
+    }
+  }
+  
+  function toast(message, type = 'info') {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+      toast.classList.add('show');
+    }, 100);
+    
+    setTimeout(() => {
+      toast.classList.remove('show');
+      setTimeout(() => document.body.removeChild(toast), 300);
+    }, 3000);
+  }
+
+function toggleDark(on){
+  document.documentElement.style.background = on ? '#111' : '';
+  document.body.style.background = on ? '#111' : '';
+  document.body.style.color = on ? '#eee' : '';
+  try { localStorage.setItem('adm_dark', on ? '1':'0'); } catch(e){}
+}
+
+function openAddForm(){
+  document.getElementById('add_form').style.display = '';
+}
+function cancelAdd(){
+  document.getElementById('add_form').style.display = 'none';
+  document.getElementById('add_id').value='';
+  document.getElementById('add_name').value='';
+  document.getElementById('add_pwd').value='';
+  document.getElementById('admin_pwd_add').value='';
+}
+
+async function submitAdd(){
+  const cid = document.getElementById('add_id').value.trim();
+  const name = document.getElementById('add_name').value.trim();
+  const pw = document.getElementById('add_pwd').value;
+  const apw = document.getElementById('admin_pwd_add').value;
+  if(!cid || !name || !pw || !apw){ toast('Fill all fields','error'); return; }
+  
+  // Show progress and log areas
+  const progressDiv = document.getElementById('client_progress');
+  const logDiv = document.getElementById('client_log');
+  const progressBar = document.getElementById('client_progress_bar');
+  const progressText = document.getElementById('client_progress_text');
+  
+  progressDiv.style.display = 'block';
+  logDiv.style.display = 'block';
+  logDiv.innerHTML = '';
+  
+  // Simulate progress for client addition
+  let progress = 0;
+  const progressInterval = setInterval(() => {
+    progress += Math.random() * 20;
+    if(progress > 90) progress = 90;
+    progressBar.style.width = progress + '%';
+    progressText.textContent = Math.round(progress) + '%';
+    
+    if(progress < 30) {
+      logDiv.innerHTML += 'Validating client credentials...<br>';
+    } else if(progress < 60) {
+      logDiv.innerHTML += 'Registering client with server...<br>';
+    } else if(progress < 90) {
+      logDiv.innerHTML += 'Updating client registry...<br>';
+    }
+    
+    logDiv.scrollTop = logDiv.scrollHeight;
+  }, 100);
+  
+  const fd = new FormData();
+  fd.append('admin_password', apw);
+  fd.append('client_id', cid);
+  fd.append('name', name);
+  fd.append('password', pw);
+  const r = await fetch('/admin/register_client', {method:'POST', body: fd});
+  
+  clearInterval(progressInterval);
+  
+  // Complete progress
+  progressBar.style.width = '100%';
+  progressText.textContent = '100%';
+  logDiv.innerHTML += 'Client operation completed!<br>';
+  
+  document.getElementById('status').innerText = await r.text();
+  if(r.ok){ toast('Client added','success'); cancelAdd(); fetchClients(); } else { toast('Add failed','error'); }
+  
+  // Hide progress after delay
+  setTimeout(() => {
+    progressDiv.style.display = 'none';
+    logDiv.style.display = 'none';
+  }, 2000);
+}
+
+async function removeClient(cid){
+  const apw = prompt('Confirm admin password to remove client '+cid+':');
+  if(!apw) return;
+  
+  // Show progress and log areas
+  const progressDiv = document.getElementById('client_progress');
+  const logDiv = document.getElementById('client_log');
+  const progressBar = document.getElementById('client_progress_bar');
+  const progressText = document.getElementById('client_progress_text');
+  
+  progressDiv.style.display = 'block';
+  logDiv.style.display = 'block';
+  logDiv.innerHTML = '';
+  
+  // Simulate progress for client removal
+  let progress = 0;
+  const progressInterval = setInterval(() => {
+    progress += Math.random() * 25;
+    if(progress > 90) progress = 90;
+    progressBar.style.width = progress + '%';
+    progressText.textContent = Math.round(progress) + '%';
+    
+    if(progress < 40) {
+      logDiv.innerHTML += 'Verifying admin credentials...<br>';
+    } else if(progress < 80) {
+      logDiv.innerHTML += 'Removing client from registry...<br>';
+    } else {
+      logDiv.innerHTML += 'Cleaning up client data...<br>';
+    }
+    
+    logDiv.scrollTop = logDiv.scrollHeight;
+  }, 80);
+  
+  const fd = new FormData();
+  fd.append('admin_password', apw);
+  fd.append('client_id', cid);
+  const r = await fetch('/admin/remove_client', {method:'POST', body: fd});
+  
+  clearInterval(progressInterval);
+  
+  // Complete progress
+  progressBar.style.width = '100%';
+  progressText.textContent = '100%';
+  logDiv.innerHTML += 'Client removal completed!<br>';
+  
+  document.getElementById('status').innerText = await r.text();
+  if(r.ok){ toast('Client removed','success'); fetchClients(); } else { toast('Remove failed','error'); }
+  
+  // Hide progress after delay
+  setTimeout(() => {
+    progressDiv.style.display = 'none';
+    logDiv.style.display = 'none';
+  }, 2000);
+}
+
+function renderClients(){
+  const tb = document.querySelector('#tbl tbody');
+  tb.innerHTML = '';
+  const q = (document.getElementById('filter').value||'').toLowerCase();
+  let shown = 0;
+  Object.entries(CLIENTS).forEach(([cid, info])=>{
+    const name = (info.name||'');
+    if(q && !(cid.toLowerCase().includes(q) || name.toLowerCase().includes(q))) return;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${cid}</td><td>${name}</td>`+
+      `<td><button class=\"btn\" onclick=\"removeClient('${cid}')\">Remove</button></td>`;
+    tb.appendChild(tr);
+    shown++;
+  });
+  const cc = document.getElementById('client_count');
+  if(cc){
+    const total = Object.keys(CLIENTS||{}).length;
+    cc.textContent = `Showing ${shown} of ${total}`;
+  }
+}
+
+async function fetchClients(){
+  const r = await fetch('/admin/clients');
+  const j = await r.json();
+  CLIENTS = j.clients || {};
+  renderClients();
+}
+
+async function trainGlobalDataset(ev){
+  const pw = document.getElementById('admin_pw').value;
+  const file = document.getElementById('dataset_file').files[0];
+  const epochs = document.getElementById('epochs').value || 1;
+  if(!pw||!file){ toast('Provide admin password and CSV file','error'); return; }
+  
+  // Show progress and log areas
+  const progressDiv = document.getElementById('train_progress');
+  const logDiv = document.getElementById('train_log');
+  const progressBar = document.getElementById('train_progress_bar');
+  const progressText = document.getElementById('train_progress_text');
+  
+  progressDiv.style.display = 'block';
+  logDiv.style.display = 'block';
+  logDiv.innerHTML = '';
+  
+  // Simulate training progress
+  let progress = 0;
+  const totalSteps = epochs * 4; // 4 steps per epoch: data load, LSTM training, IF update, model save
+  let currentStep = 0;
+  
+  const progressInterval = setInterval(() => {
+    currentStep++;
+    progress = (currentStep / totalSteps) * 100;
+    if(progress > 90) progress = 90;
+    
+    progressBar.style.width = progress + '%';
+    progressText.textContent = Math.round(progress) + '%';
+    
+    // Add training logs
+    if(currentStep <= epochs) {
+      logDiv.innerHTML += `Epoch ${currentStep}/${epochs}: Loading data and training LSTM...<br>`;
+    } else if(currentStep <= epochs * 2) {
+      logDiv.innerHTML += `Epoch ${currentStep - epochs}/${epochs}: Updating Isolation Forest...<br>`;
+    } else if(currentStep <= epochs * 3) {
+      logDiv.innerHTML += `Epoch ${currentStep - epochs * 2}/${epochs}: Aggregating models...<br>`;
+    } else {
+      logDiv.innerHTML += `Saving global model...<br>`;
+    }
+    
+    logDiv.scrollTop = logDiv.scrollHeight;
+  }, 150);
+  
+  const fd = new FormData();
+  fd.append('admin_password', pw);
+  fd.append('epochs', epochs);
+  fd.append('dataset', file);
+  const btn = ev && ev.target ? ev.target : null;
+  if(btn) btn.disabled = true;
+  document.getElementById('spinner').style.display = '';
+  try{
+    const r = await fetch('/admin/train_global_dataset', {method:'POST', body: fd});
+    clearInterval(progressInterval);
+    
+    // Complete progress
+    progressBar.style.width = '100%';
+    progressText.textContent = '100%';
+    logDiv.innerHTML += 'Global training completed!<br>';
+    
+    const t = await r.text();
+    document.getElementById('status').innerText = t;
+    if(r.ok){ toast('Global training completed','success'); } else { toast('Global training failed','error'); }
+  } finally {
+    document.getElementById('spinner').style.display = 'none';
+    if(btn) btn.disabled = false;
+  }
+  
+  // Hide progress after delay
+  setTimeout(() => {
+    progressDiv.style.display = 'none';
+    logDiv.style.display = 'none';
+  }, 3000);
+}
+
+async function bootstrapAdmin(){
+  const pw = prompt('Set new admin password (min 6 chars):');
+  if(!pw) return;
+  const fd = new FormData();
+  fd.append('password', pw);
+  const r = await fetch('/admin/bootstrap', {method:'POST', body: fd});
+  document.getElementById('status').innerText = await r.text();
+  if(r.ok){ toast('Admin password bootstrapped','success'); } else { toast('Bootstrap failed','error'); }
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  fetchClients();
+  try{ const d = localStorage.getItem('adm_dark'); if(d==='1'){ const t=document.getElementById('dark_toggle'); if(t) t.checked=true; toggleDark(true); } }catch(e){}
+});
+
+function exportClients(){
+  const headers = ['id','name'];
+  let csv = headers.join(',') + '\n';
+  Object.entries(CLIENTS).forEach(([cid, info])=>{
+    csv += [cid, (info.name||'')].join(',') + '\n';
+  });
+  const blob = new Blob([csv], {type:'text/csv'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'clients.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+async function testServer(){
+  const t0 = performance.now();
+  try{
+    const r = await fetch('/admin/clients', {method:'GET'});
+    const t1 = performance.now();
+    const ms = Math.round(t1 - t0);
+    const el = document.getElementById('srv_status');
+    if(r.ok){ el.textContent = `Reachable (${ms} ms)`; el.style.color = '#0a7e07'; toast('Server reachable','success'); }
+    else { el.textContent = `Unreachable (HTTP ${r.status})`; el.style.color = '#b00020'; toast('Server test failed','error'); }
+  } catch(e){
+    const el = document.getElementById('srv_status');
+    el.textContent = 'Unreachable'; el.style.color = '#b00020'; toast('Server test failed','error');
+  }
+}
+</script>
